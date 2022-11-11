@@ -1,12 +1,13 @@
 const express = require('express');
 const cors = require('cors');
-var jwt = require('jsonwebtoken');
+const jwt = require('jsonwebtoken');
 require('dotenv').config();
 const app = express();
 const port = process.env.PORT || 5000;
-const { MongoClient, ServerApiVersion, MongoRuntimeError } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 var nodemailer = require('nodemailer');
 var sgTransport = require('nodemailer-sendgrid-transport');
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 
 //use middleware
@@ -49,21 +50,21 @@ function verifyJWT(req, res, next) {
 
 const emailSenderOptions = {
     auth: {
-      api_key: process.env.EMAIL_SENDER_KEY
+        api_key: process.env.EMAIL_SENDER_KEY
     }
-  }
-  
-  const emailClient = nodemailer.createTransport(sgTransport(emailSenderOptions));
-  
-  function sendAppointmentEmail(booking){
-    const {patient, patientName, treatment, date, slot} = booking;
-  
+}
+
+const emailClient = nodemailer.createTransport(sgTransport(emailSenderOptions));
+
+function sendAppointmentEmail(booking) {
+    const { patient, patientName, treatment, date, slot } = booking;
+
     var email = {
-      from: process.env.EMAIL_SENDER,
-      to: patient,
-      subject: `Your Appointment for ${treatment} is on ${date} at ${slot} is Confirmed`,
-      text: `Your Appointment for ${treatment} is on ${date} at ${slot} is Confirmed`,
-      html: `
+        from: process.env.EMAIL_SENDER,
+        to: patient,
+        subject: `Your Appointment for ${treatment} is on ${date} at ${slot} is Confirmed`,
+        text: `Your Appointment for ${treatment} is on ${date} at ${slot} is Confirmed`,
+        html: `
         <div>
           <p> Hello ${patientName}, </p>
           <h3>Your Appointment for ${treatment} is confirmed</h3>
@@ -76,17 +77,57 @@ const emailSenderOptions = {
         </div>
       `
     };
+
+    emailClient.sendMail(email, function (err, info) {
+        if (err) {
+            console.log(err);
+        }
+        else {
+            console.log('Message sent: ', info);
+        }
+    });
+
+}
+
+
+
+
+
+//Payment confirm email
+
+function sendPaymentConfirmationEmail(booking) {
+    const { patient, patientName, treatment, date, slot } = booking;
   
-    emailClient.sendMail(email, function(err, info){
-      if (err ){
+    var email = {
+      from: process.env.EMAIL_SENDER,
+      to: patient,
+      subject: `We have received your payment for ${treatment} is on ${date} at ${slot} is Confirmed`,
+      text: `Your payment for this Appointment ${treatment} is on ${date} at ${slot} is Confirmed`,
+      html: `
+        <div>
+          <p> Hello ${patientName}, </p>
+          <h3>Thank you for your payment . </h3>
+          <h3>We have received your payment</h3>
+          <p>Looking forward to seeing you on ${date} at ${slot}.</p>
+          <h3>Our Address</h3>
+          <p>Andor Killa Bandorban</p>
+          <p>Bangladesh</p>
+          <a href="https://web.programming-hero.com/">unsubscribe</a>
+        </div>
+      `
+    };
+  
+    emailClient.sendMail(email, function (err, info) {
+      if (err) {
         console.log(err);
       }
       else {
         console.log('Message sent: ', info);
       }
-  });
+    });
   
-}
+  }
+  
 
 // sender email ends here ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 
@@ -101,6 +142,7 @@ async function run() {
         const bookingCollection = client.db('doctors_portal').collection('bookings');
         const userCollection = client.db('doctors_portal').collection('users');
         const doctorCollection = client.db('doctors_portal').collection('doctors');
+        const paymentCollection = client.db('doctors_portal').collection('payments');
 
 
 
@@ -117,8 +159,25 @@ async function run() {
 
         }
 
+        //payment intent here stripe
+        app.post('/create-payment-intent', verifyJWT, async(req, res) =>{
+            const service = req.body;
+            const price = service.price;
+            const amount = price*100;
+            const paymentIntent = await stripe.paymentIntents.create({
+              amount : amount,
+              currency: 'usd',
+              payment_method_types:['card']
+            });
+            res.send({clientSecret: paymentIntent.client_secret})
+          });
+      
 
 
+
+
+
+      // get all services here!......................
         app.get('/service', async (req, res) => {
             const query = {};
             const cursor = servicesCollection.find(query).project({ name: 1 });
@@ -246,6 +305,40 @@ async function run() {
 
 
 
+        //booking get for payment  api for specefic ID 
+
+        app.get('/booking/:id', verifyJWT, async (req, res) => {
+            const id = req.params.id;
+            const query = { _id: ObjectId(id) };
+            const booking = await bookingCollection.findOne(query);
+            res.send(booking);
+
+        })
+
+
+
+
+        //payment all info api 
+        
+    app.patch('/booking/:id', verifyJWT, async(req, res) =>{
+        const id  = req.params.id;
+        const payment = req.body;
+        const filter = {_id: ObjectId(id)};
+        const updatedDoc = {
+          $set: {
+            paid: true,
+            transactionId: payment.transactionId
+          }
+        }
+  
+        const result = await paymentCollection.insertOne(payment);
+        const updatedBooking = await bookingCollection.updateOne(filter, updatedDoc);
+        res.send(updatedBooking);
+      })
+
+
+
+
 
         app.post('/booking', async (req, res) => {
             const booking = req.body;
@@ -267,9 +360,10 @@ async function run() {
 
 
         // get doctor data for manage section api: 
-        app.get('/doctor',verifyJWT, verifyAdmin, async(req , res) => {
+        app.get('/doctor', verifyJWT, verifyAdmin, async (req, res) => {
             const doctors = await doctorCollection.find().toArray();
             res.send(doctors);
+
 
         })
 
@@ -287,7 +381,7 @@ async function run() {
         //doctors delete api here!
         app.delete('/doctor/:email', verifyJWT, verifyAdmin, async (req, res) => {
             const email = req.params.email;
-            const filter = {email: email};
+            const filter = { email: email };
             const result = await doctorCollection.deleteOne(filter);
             res.send(result);
         })
