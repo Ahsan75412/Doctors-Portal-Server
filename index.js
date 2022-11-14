@@ -97,13 +97,13 @@ function sendAppointmentEmail(booking) {
 
 function sendPaymentConfirmationEmail(booking) {
     const { patient, patientName, treatment, date, slot } = booking;
-  
+
     var email = {
-      from: process.env.EMAIL_SENDER,
-      to: patient,
-      subject: `We have received your payment for ${treatment} is on ${date} at ${slot} is Confirmed`,
-      text: `Your payment for this Appointment ${treatment} is on ${date} at ${slot} is Confirmed`,
-      html: `
+        from: process.env.EMAIL_SENDER,
+        to: patient,
+        subject: `We have received your payment for ${treatment} is on ${date} at ${slot} is Confirmed`,
+        text: `Your payment for this Appointment ${treatment} is on ${date} at ${slot} is Confirmed`,
+        html: `
         <div>
           <p> Hello ${patientName}, </p>
           <h3>Thank you for your payment . </h3>
@@ -116,18 +116,18 @@ function sendPaymentConfirmationEmail(booking) {
         </div>
       `
     };
-  
+
     emailClient.sendMail(email, function (err, info) {
-      if (err) {
-        console.log(err);
-      }
-      else {
-        console.log('Message sent: ', info);
-      }
+        if (err) {
+            console.log(err);
+        }
+        else {
+            console.log('Message sent: ', info);
+        }
     });
-  
-  }
-  
+
+}
+
 
 // sender email ends here ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 
@@ -147,37 +147,37 @@ async function run() {
 
 
         // verifyAdmin middleware token or checking admin or not , if admin then goto to next
+
         const verifyAdmin = async (req, res, next) => {
             const requester = req.decoded.email;
             const requesterAccount = await userCollection.findOne({ email: requester });
             if (requesterAccount.role === 'admin') {
                 next();
-            } else {
-                res.status(403).send({ message: 'forbidden' });
-
             }
-
+            else {
+                res.status(403).send({ message: 'forbidden' });
+            }
         }
 
         //payment intent here stripe
-        app.post('/create-payment-intent', verifyJWT, async(req, res) =>{
+        app.post('/create-payment-intent', verifyJWT, async (req, res) => {
             const service = req.body;
             const price = service.price;
-            const amount = price*100;
+            const amount = price * 100;
             const paymentIntent = await stripe.paymentIntents.create({
-              amount : amount,
-              currency: 'usd',
-              payment_method_types:['card']
+                amount: amount,
+                currency: 'usd',
+                payment_method_types: ['card']
             });
-            res.send({clientSecret: paymentIntent.client_secret})
-          });
-      
+            res.send({ clientSecret: paymentIntent.client_secret })
+        });
 
 
 
 
 
-      // get all services here!......................
+
+        // get all services here!......................
         app.get('/service', async (req, res) => {
             const query = {};
             const cursor = servicesCollection.find(query).project({ name: 1 });
@@ -192,7 +192,7 @@ async function run() {
         app.get('/user', verifyJWT, async (req, res) => {
             const users = await userCollection.find().toArray();
             res.send(users);
-        })
+        });
 
 
 
@@ -214,9 +214,7 @@ async function run() {
             };
             const result = await userCollection.updateOne(filter, updateDoc);
             res.send(result);
-
         })
-
 
 
 
@@ -231,9 +229,9 @@ async function run() {
                 $set: user,
             };
             const result = await userCollection.updateOne(filter, updateDoc, options);
-            const token = jwt.sign({ email: email }, process.env.ACCESS_TOKEN_SECRET, { expiresIn: '1h' });
+            const token = jwt.sign({ email: email }, process.env.ACCESS_TOKEN_SECRET, { expiresIn: '1h' })
             res.send({ result, token });
-        })
+        });
 
 
         // Warning: This is not the proper way to query multiple collection. 
@@ -287,17 +285,14 @@ async function run() {
             const patient = req.query.patient;
             const decodedEmail = req.decoded.email;
             if (patient === decodedEmail) {
-                const authorization = req.headers.authorization;
-                // console.log('auth header',authorization);
                 const query = { patient: patient };
                 const bookings = await bookingCollection.find(query).toArray();
-                res.send(bookings);
-
-            } else {
+                return res.send(bookings);
+            }
+            else {
                 return res.status(403).send({ message: 'forbidden access' });
             }
-
-        })
+        });
 
 
 
@@ -312,29 +307,9 @@ async function run() {
             const query = { _id: ObjectId(id) };
             const booking = await bookingCollection.findOne(query);
             res.send(booking);
-
         })
 
 
-
-
-        //payment all info api 
-        
-    app.patch('/booking/:id', verifyJWT, async(req, res) =>{
-        const id  = req.params.id;
-        const payment = req.body;
-        const filter = {_id: ObjectId(id)};
-        const updatedDoc = {
-          $set: {
-            paid: true,
-            transactionId: payment.transactionId
-          }
-        }
-  
-        const result = await paymentCollection.insertOne(payment);
-        const updatedBooking = await bookingCollection.updateOne(filter, updatedDoc);
-        res.send(updatedBooking);
-      })
 
 
 
@@ -348,11 +323,30 @@ async function run() {
                 return res.send({ success: false, booking: exists })
             }
             const result = await bookingCollection.insertOne(booking);
-            console.log('email send');
+            console.log('sending email');
             sendAppointmentEmail(booking);
-
             return res.send({ success: true, result });
+        });
+
+
+        //payment all info api 
+
+        app.patch('/booking/:id', verifyJWT, async (req, res) => {
+            const id = req.params.id;
+            const payment = req.body;
+            const filter = { _id: ObjectId(id) };
+            const updatedDoc = {
+                $set: {
+                    paid: true,
+                    transactionId: payment.transactionId
+                }
+            }
+
+            const result = await paymentCollection.insertOne(payment);
+            const updatedBooking = await bookingCollection.updateOne(filter, updatedDoc);
+            res.send(updatedBooking);
         })
+
 
 
 
@@ -363,16 +357,16 @@ async function run() {
         app.get('/doctor', verifyJWT, verifyAdmin, async (req, res) => {
             const doctors = await doctorCollection.find().toArray();
             res.send(doctors);
-
-
         })
+
+
 
         //doctors data api here!
         app.post('/doctor', verifyJWT, verifyAdmin, async (req, res) => {
             const doctor = req.body;
             const result = await doctorCollection.insertOne(doctor);
             res.send(result);
-        })
+        });
 
 
 
